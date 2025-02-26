@@ -13,7 +13,10 @@ from .common.token_cunsumption import (
 from .utils import get_service
 import json
 from pydantic import BaseModel
-
+import requests
+import httpx
+from datetime import datetime
+import re
 
 class SearchResponse(TypedDict):
     data: List[Dict[str, str]]
@@ -29,6 +32,74 @@ class SerpQuery(BaseModel):
     research_goal: str
 
 
+def bing_search(query):
+    url = 'https://tgenerator.aicubes.cn/iwc-index-search-engine/search_engine/v1/search'
+    
+    params = {
+        'query': query,
+        # 'se': 'BAIDU',
+        'se': 'BING',
+        'limit': 5,
+        'user_id': 'test',
+        'app_id': 'test',
+        'trace_id': 'test',
+        'with_content': True
+    }
+
+    header = {
+        'X-Arsenal-Auth': 'arsenal-tools'
+    }
+    try:
+        response_dic = requests.post(url, data=params, headers=header)
+        # async with httpx.AsyncClient() as client:
+        #     response_dic = await client.post(url, data=params, headers=header)
+
+        if response_dic.status_code == 200:
+            response =  json.loads(response_dic.text)['data']
+
+            # 替换为serapi googlesearch的格式
+
+            organic_results_lst = []
+            for idx, t in enumerate(response):
+                position = idx +1
+                title = t['title'] if t['title'] else ""
+                link = t['url']
+                snippet = t['summary'] if t['summary'] else ""
+                date = t['publish_time'] if t['publish_time'] else ""
+                source = t['data_source'] if t['data_source'] else ""
+                content = t['content'] if t['content'] else ""
+
+
+                if date:
+                    dt_object = datetime.fromtimestamp(date)
+                    formatted_time = dt_object.strftime("%Y-%m-%d %H:%M:%S")
+                    date = formatted_time
+                    
+
+                organic_results_lst.append({
+                    "position": position,
+                    "title": title,
+                    "url": link,
+                    "snippet": snippet,
+                    "date": date,
+                    "source": source,
+                    "content": content
+                })
+            
+            # res = {
+            #     "search_parameters": response_dic.json()['header'],
+            #     "organic_results": organic_results_lst
+            # }
+
+            return organic_results_lst
+
+        else:
+            print(f"搜索失败，状态码：{response.status_code}")
+            return []
+    except Exception as e:
+        print(f"请求发生错误：{str(e)}")
+        return []  # 出现异常时也返回空列表
+
 class Firecrawl:
     """Simple wrapper for Firecrawl SDK."""
 
@@ -43,10 +114,11 @@ class Firecrawl:
             # Run the synchronous SDK call in a thread pool
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.app.search(
+                lambda: bing_search(
                     query=query,
                 ),
             )
+            # response = await bing_search(query)
 
             # Handle the response format from the SDK
             if isinstance(response, dict) and "data" in response:
@@ -105,7 +177,7 @@ async def generate_serp_queries(
 ) -> List[SerpQuery]:
     """Generate SERP queries based on user input and previous learnings."""
 
-    prompt = f"""Given the following prompt from the user, generate a list of SERP queries to research the topic. Return a JSON object with a 'queries' array field containing {num_queries} queries (or less if the original prompt is clear). Each query object should have 'query' and 'research_goal' fields. Make sure each query is unique and not similar to each other: <prompt>{query}</prompt>"""
+    prompt = f"""Given the following prompt from the user, generate a list of SERP queries to research the topic. Return a JSON object with a 'queries' array field containing {num_queries} queries (or less if the original prompt is clear). Each query object should have 'query' and 'research_goal' fields. Notice that 'query' must be a simple question that can be answered directly through google search engine. Make sure each query is unique and not similar to each other: <prompt>{query}</prompt>"""
 
     if learnings:
         prompt += f"\n\nHere are some learnings from previous research, use them to generate more specific queries: {' '.join(learnings)}"
@@ -117,7 +189,8 @@ async def generate_serp_queries(
             {"role": "system", "content": system_prompt()},
             {"role": "user", "content": prompt},
         ],
-        format=SerpQueryResponse.model_json_schema(),
+        # format=SerpQueryResponse.model_json_schema(),
+        format={"type": "json_object"},
     )
 
     try:
@@ -125,8 +198,15 @@ async def generate_serp_queries(
             result = SerpQueryResponse.model_validate_json(response.message.content)
             parse_ollama_token_consume("generate_serp_queries", response)
         else:
+            # json格式兜底
+            json_response = response.choices[0].message.content
+            try:
+                json.loads(json_response) # 为正常json
+            except:
+                json_response = re.findall(r"```(?:json)?\s*(.*?)\s*```", json_response, re.DOTALL)[0]
+
             result = SerpQueryResponse.model_validate_json(
-                response.choices[0].message.content
+                json_response
             )
             parse_openai_token_consume("generate_serp_queries", response)
 
@@ -171,7 +251,7 @@ async def process_serp_result(
         f"Given the following contents from a SERP search for the query <query>{query}</query>, "
         f"generate a list of learnings from the contents. Return a JSON object with 'learnings' "
         f"and 'followUpQuestions' keys with array of strings as values. Include up to {num_learnings} learnings and "
-        f"{num_follow_up_questions} follow-up questions. The learnings should be unique, "
+        f"{num_follow_up_questions} follow-up questions. Notice that 'followUpQuestions' must be a simple question that can be answered directly through google search engine. The learnings should be unique, "
         "concise, and information-dense, including entities, metrics, numbers, and dates.\n\n"
         f"<contents>{contents_str}</contents>"
     )
@@ -183,7 +263,8 @@ async def process_serp_result(
             {"role": "system", "content": system_prompt()},
             {"role": "user", "content": prompt},
         ],
-        format=SerpResultResponse.model_json_schema(),
+        # format=SerpResultResponse.model_json_schema(),
+        format={"type": "json_object"},
     )
 
     try:
@@ -191,8 +272,16 @@ async def process_serp_result(
             result = SerpResultResponse.model_validate_json(response.message.content)
             parse_ollama_token_consume("process_serp_result", response)
         else:
+
+            # json格式兜底
+            json_response = response.choices[0].message.content
+            try:
+                json.loads(json_response) # 为正常json
+            except:
+                json_response =re.findall(r"```(?:json)?\s*(.*?)\s*```", json_response, re.DOTALL)[0]
+
             result = SerpResultResponse.model_validate_json(
-                response.choices[0].message.content
+                json_response
             )
             parse_openai_token_consume("process_serp_result", response)
 
@@ -218,13 +307,16 @@ async def process_serp_result(
 class FinalReportResponse(BaseModel):
     reportMarkdown: str
 
-
+import sys
+sys.path.append('../deep_research_py')
+from gen_outline_acticle import *
 async def write_final_report(
     prompt: str,
     learnings: List[str],
     visited_urls: List[str],
     client: openai.OpenAI,
     model: str,
+    writing_method="serial"
 ) -> str:
     """Generate final report based on all research learnings."""
 
@@ -241,27 +333,35 @@ async def write_final_report(
         f"Here are all the learnings from research:\n\n<learnings>\n{learnings_string}\n</learnings>"
     )
 
-    response = await generate_completions(
-        client=client,
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt()},
-            {"role": "user", "content": user_prompt},
-        ],
-        format=FinalReportResponse.model_json_schema(),
+    # step1: 生成outline
+    draft_outlines = await write_outline(prompt, learnings_string, client, model)
+    print(
+        f"gen draft outlines: {draft_outlines}"
     )
+    log_event(f"gen draft outlines: {draft_outlines}")
+
+    # # step2: 润色outline
+    outlines = await write_outline_polish(prompt, learnings_string, client, model, draft_outlines)
+    print(
+        f"gen polish outlines: {outlines}"
+    )
+    log_event(f"gen polish outlines: {outlines}")
+    
+    # # step3: 生成文章
+    report =  await generate_article(prompt, learnings_string, client, model, outlines, writing_method)
+    
 
     try:
-        if get_service() == "ollama":
-            result = FinalReportResponse.model_validate_json(response.message.content)
-            parse_ollama_token_consume("write_final_report", response)
-        else:
-            result = FinalReportResponse.model_validate_json(
-                response.choices[0].message.content
-            )
-            parse_openai_token_consume("write_final_report", response)
+        # if get_service() == "ollama":
+        #     result = FinalReportResponse.model_validate_json(response.message.content)
+        #     parse_ollama_token_consume("write_final_report", response)
+        # else:
+        #     result = FinalReportResponse.model_validate_json(
+        #         response.choices[0].message.content
+        #     )
+        #     parse_openai_token_consume("write_final_report", response)
 
-        report = result.reportMarkdown if result.reportMarkdown else ""
+        # report = result.reportMarkdown if result.reportMarkdown else ""
         log_event(
             f"Generated final report based on {len(learnings)} learnings from {len(visited_urls)} sources"
         )
@@ -272,9 +372,9 @@ async def write_final_report(
         return report + urls_section
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON response: {e}")
-        print(f"Raw response: {response.choices[0].message.content}")
+        # print(f"Raw response: {response.choices[0].message.content}")
         log_error(
-            f"Failed to generate final report for research query, raw response: {response.choices[0].message.content}"
+            f"Failed to generate final report for research query, raw response:"
         )
         return "Error generating report"
 

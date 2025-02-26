@@ -11,7 +11,7 @@ from .common.token_cunsumption import (
 )
 from deep_research_py.utils import get_service
 from pydantic import BaseModel
-
+import re
 
 class FeedbackResponse(BaseModel):
     questions: List[str]
@@ -25,7 +25,12 @@ async def generate_feedback(
 ) -> List[str]:
     """Generates follow-up questions to clarify research direction."""
 
-    prompt = f"Given this research topic: {query}, generate at most {max_feedbacks} follow-up questions to better understand the user's research needs, but feel free to return none questions if the original query is clear. Return the response as a JSON object with a 'questions' array field."
+    prompt = f"""Analyze the research topic: "{query}" and identify any ambiguous or unclear aspects that need clarification. Generate up to {max_feedbacks} clarifying questions that will help better understand the user's research intent.
+Requirements for the follow-up questions:
+- Focus on ambiguous or undefined aspects in the original query.
+- Please prompt the user with possible answers to the question, in order to help narrow down the user's intent.
+- If the original query is sufficiently clear and comprehensive, you may return an empty question list
+- Return the response as a JSON object with a 'questions' array field, every array element should be a string."""
 
     response = await generate_completions(
         client=client,
@@ -37,7 +42,8 @@ async def generate_feedback(
                 "content": prompt,
             },
         ],
-        format=FeedbackResponse.model_json_schema(),
+        # format=FeedbackResponse.model_json_schema(),
+        format={"type": "json_object"},
     )
 
     # Parse the JSON response
@@ -47,13 +53,22 @@ async def generate_feedback(
             parse_ollama_token_consume("generate_feedback", response)
         else:
             # OpenAI compatible API
-            result = json.loads(response.choices[0].message.content)
+            # json格式兜底
+            json_response = response.choices[0].message.content
+            try:
+                json.loads(json_response) # 为正常json
+            except:
+                json_response = re.findall(r"```(?:json)?\s*(.*?)\s*```", json_response, re.DOTALL)[0]
+
+            result = json.loads(json_response)
+            
+            # result = json.loads(response.choices[0].message.content.strip().strip("```json").strip("```"))
             parse_openai_token_consume("generate_feedback", response)
 
         log_event(
-            f"Generated {len(result.get('questions', []))} follow-up questions for query: {query}"
+            f"Generated {len(result.get('questions', []))} feedback follow-up questions for query: {query}"
         )
-        log_event(f"Got follow-up questions: {result.get('questions', [])}")
+        log_event(f"Got feedback follow-up questions: {result.get('questions', [])}")
         return result.get("questions", [])
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON response: {e}")

@@ -3,7 +3,7 @@ import datetime
 import os
 
 
-loggger = None
+logger = None
 
 
 def initial_logger(logging_path: str = "log", enable_stdout: bool = False) -> None:
