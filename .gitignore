@@ -9,6 +9,7 @@
 output.md
 **/output/
 **/logs/
+**/log.*
 
 # Distribution / packaging
 .Python
