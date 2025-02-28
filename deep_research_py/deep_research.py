@@ -17,6 +17,7 @@ import requests
 import httpx
 from datetime import datetime
 import re
+import streamlit as st
 
 class SearchResponse(TypedDict):
     data: List[Dict[str, str]]
@@ -32,14 +33,14 @@ class SerpQuery(BaseModel):
     research_goal: str
 
 
-def bing_search(query):
+def bing_search(query, limit=5):
     url = 'https://tgenerator.aicubes.cn/iwc-index-search-engine/search_engine/v1/search'
     
     params = {
         'query': query,
         # 'se': 'BAIDU',
         'se': 'BING',
-        'limit': 5,
+        'limit': limit,
         'user_id': 'test',
         'app_id': 'test',
         'trace_id': 'test',
@@ -115,7 +116,7 @@ class Firecrawl:
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: bing_search(
-                    query=query,
+                    query=query, limit=limit
                 ),
             )
             # response = await bing_search(query)
@@ -213,6 +214,10 @@ async def generate_serp_queries(
         queries = result.queries if result.queries else []
         log_event(f"Generated {len(queries)} SERP queries for research query: {query}")
         log_event(f"Got queries: {queries}")
+
+        with st.chat_message("assistant"):
+            st.markdown(f"Generated {len(queries)} SERP queries for research query: {query}")
+            st.markdown(f"Got queries: {queries}")
         return queries[:num_queries]
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON response: {e}")
@@ -291,6 +296,11 @@ async def process_serp_result(
         log_event(
             f"Got learnings: {len(result.learnings)} and follow-up questions: {len(result.followUpQuestions)}"
         )
+        with st.chat_message("assistant"):
+            st.markdown(
+                f"Processed SERP results for query: {query}, found {len(result.learnings)} learnings and {len(result.followUpQuestions)} follow-up questions"
+            )
+
         return {
             "learnings": result.learnings[:num_learnings],
             "followUpQuestions": result.followUpQuestions[:num_follow_up_questions],
@@ -336,16 +346,20 @@ async def write_final_report(
     # step1: 生成outline
     draft_outlines = await write_outline(prompt, learnings_string, client, model)
     print(
-        f"gen draft outlines: {draft_outlines}"
+        f"gen draft outlines:\n {draft_outlines}"
     )
-    log_event(f"gen draft outlines: {draft_outlines}")
+    log_event(f"gen draft outlines:\n {draft_outlines}")
+    with st.chat_message('assistant'):
+        st.markdown(f"gen draft outlines:\n {draft_outlines}")
 
     # # step2: 润色outline
     outlines = await write_outline_polish(prompt, learnings_string, client, model, draft_outlines)
     print(
-        f"gen polish outlines: {outlines}"
+        f"gen polish outlines:\n {outlines}"
     )
-    log_event(f"gen polish outlines: {outlines}")
+    log_event(f"gen polish outlines:\n {outlines}")
+    with st.chat_message('assistant'):
+        st.markdown(f"gen polish outlines:\n {outlines}")
     
     # # step3: 生成文章
     report =  await generate_article(prompt, learnings_string, client, model, outlines, writing_method)

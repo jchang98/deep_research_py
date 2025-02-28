@@ -15,6 +15,7 @@ from deep_research_py.utils import console, set_service, set_model
 from deep_research_py.common.token_cunsumption import counter
 from deep_research_py.common.logging import log_event
 from datetime import datetime
+import streamlit as st
 
 load_dotenv()
 app = typer.Typer()
@@ -33,10 +34,9 @@ async def async_prompt(message: str, default: str = "") -> str:
     """Async wrapper for prompt_toolkit."""
     return await session.prompt_async(message)
 
-
-@app.command()
-@coro
-async def main(
+# @app.command()
+# @coro
+async def get_feedback(
     concurrency: int = typer.Option(
         default=2, help="Number of concurrent tasks, depending on your API rate limits."
     ),
@@ -61,21 +61,36 @@ async def main(
         default=False,
         help="Log to stdout.",
     ),
-):  
-
+    query:str = typer.Option(
+        default="",
+        help="Query for research.",
+    ),
+    breadth:int = typer.Option(
+        default=2,
+        help="Breadth of research.",
+    ),
+    depth:int = typer.Option(
+        default=2,
+        help="Depth of research.",
+    ),
+    start_time = "",
+):
+    # 进行澄清
     # 根据模型设置service
     if model.startswith("ep-") or model.startswith("deepseek"):
         service = "deepseek"
+        model = "ep-20250208165153-wn9ft"
     else:
         service = "openai"
     set_service(service)
     set_model(model)
 
+    client = get_ai_client()
     """Initialize the Logger"""
     if enable_logging:
         from deep_research_py.common.logging import initial_logger
 
-        initial_logger(logging_path=log_path, enable_stdout=log_to_stdout)
+        initial_logger(logging_path=log_path, enable_stdout=log_to_stdout, log_file_name=f"{query}_{start_time.strftime('%Y%m%d%H%M%S')}")
         console.print(f"[dim]Logging enabled. Logs will be saved to {log_path}[/dim]")
 
     """Deep Research CLI"""
@@ -87,29 +102,34 @@ async def main(
     )
 
     console.print(f"🛠️ Using [bold green]{service.upper()}[/bold green] service.")
+    with st.chat_message('assistant').container():
+        st.markdown(f"🛠️ Using {service.upper()} service.")
+        st.markdown(f"🔍 What would you like to research?: {query}")
+        st.markdown(f"📊 Research breadth (recommended 2-10) [4]: {breadth}")
+        st.markdown(f"🔍 Research depth (recommended 1-5) [2]: {depth}")
+        st.markdown("\nCreating research plan...")
 
-    client = get_ai_client()
-    start_time = datetime.now()
 
     # Get initial inputs with clear formatting
-    query = await async_prompt("\n🔍 What would you like to research? ")
-    console.print()
+    # query = await async_prompt("\n🔍 What would you like to research? ")
+    console.print(f"🔍 What would you like to research?: {query}")
     log_event(f"🔍 What would you like to research?: {query}")
 
-    breadth_prompt = "📊 Research breadth (recommended 2-10) [4]: "
-    breadth = int((await async_prompt(breadth_prompt)) or "4")
-    console.print()
+    # breadth_prompt = "📊 Research breadth (recommended 2-10) [4]: "
+    # breadth = int((await async_prompt(breadth_prompt)) or "4")
+    console.print(f"📊 Research breadth (recommended 2-10) [4]: {breadth}")
     log_event(f"📊 Research breadth (recommended 2-10) [4]: {breadth}")
 
-    depth_prompt = "🔍 Research depth (recommended 1-5) [2]: "
-    depth = int((await async_prompt(depth_prompt)) or "2")
-    console.print()
+    # depth_prompt = "🔍 Research depth (recommended 1-5) [2]: "
+    # depth = int((await async_prompt(depth_prompt)) or "2")
+    console.print(f"🔍 Research depth (recommended 1-5) [2]: {depth}")
     log_event(f"🔍 Research depth (recommended 1-5) [2]: {depth}")
 
 
     # First show progress for research plan
     console.print("\n[yellow]Creating research plan...[/yellow]")
     log_event("\n[yellow]Creating research plan...[/yellow]")
+    
     follow_up_questions = await generate_feedback(
         query, client, model, max_followup_questions
     )
@@ -118,19 +138,81 @@ async def main(
         # Then collect answers separately from progress display
         console.print("\n[bold yellow]Follow-up Questions:[/bold yellow]")
         log_event("\n[bold yellow]Follow-up Questions:[/bold yellow]")
+
         answers = []
         for i, question in enumerate(follow_up_questions, 1):
             console.print(f"\n[bold blue]Q{i}:[/bold blue] {question}")
             log_event(f"\n[bold blue]Q{i}:[/bold blue] {question}")
-            answer = await async_prompt("➤ Your answer: ")
-            answers.append(answer)
-            console.print()
-            log_event(f"➤ Your answer: {answer}")
+
+            with st.chat_message('assistant').container():
+                st.markdown("\nFollow-up Questions:")
+                st.markdown(f"\n{question}")
 
     else:
         console.print("\n[bold green]No follow-up questions needed![/bold green]")
         log_event("\n[bold green]No follow-up questions needed![/bold green]")
-        answers = []
+    
+    return follow_up_questions
+
+
+
+# @app.command()
+# @coro
+async def answer_main(
+    concurrency: int = typer.Option(
+        default=2, help="Number of concurrent tasks, depending on your API rate limits."
+    ),
+    service: str = typer.Option(
+        default="deepseek",
+        help="Which service to use? [openai|deepseek]",
+    ),
+    model: str = typer.Option(default="ep-20250208165153-wn9ft", help="Which model to use?"), #ep-20250208165153-wn9ft
+    max_followup_questions: int = typer.Option(
+        default=5,
+        help="Maximum number of follow-up questions to generate.",
+    ),
+    enable_logging: bool = typer.Option(
+        default=True,
+        help="Enable logging.",
+    ),
+    log_path: str = typer.Option(
+        default="logs",
+        help="Path to save the logs.",
+    ),
+    log_to_stdout: bool = typer.Option(
+        default=False,
+        help="Log to stdout.",
+    ),
+    query:str = typer.Option(
+        default="",
+        help="Query for research.",
+    ),
+    breadth:int = typer.Option(
+        default=2,
+        help="Breadth of research.",
+    ),
+    depth:int = typer.Option(
+        default=2,
+        help="Depth of research.",
+    ),
+    start_time = "",
+    follow_up_questions = [],
+    answers = [],    
+):  
+
+    # 根据模型设置service
+    if model.startswith("ep-") or model.startswith("deepseek"):
+        service = "deepseek"
+        model = "ep-20250208165153-wn9ft"
+    else:
+        service = "openai"
+    set_service(service)
+    set_model(model)
+
+
+    client = get_ai_client()
+
+    
 
     # Combine information
     combined_query = f"""
@@ -138,6 +220,9 @@ async def main(
     Follow-up Questions and Answers:
     {chr(10).join(f"Q: {q} A: {a}" for q, a in zip(follow_up_questions, answers))}
     """
+    
+    with st.chat_message('assistant'):
+        st.markdown(f"\n{combined_query}")
 
     # Now use Progress for the research phase
     with Progress(
@@ -165,6 +250,11 @@ async def main(
         for learning in research_results["learnings"]:
             rprint(f"• {learning}")
             log_event(f"• {learning}")
+        
+        with st.chat_message('assistant'):
+            st.markdown("\nLearnings:")
+            for learning in research_results["learnings"]:
+                st.markdown(f"• {learning}")
 
 
         # Generate report
@@ -184,6 +274,10 @@ async def main(
         console.print(Panel(report, title="Research Report"))
         log_event("\n[bold green]Research Complete![/bold green]")
         log_event("\n[yellow]Final Report:[/yellow]")
+
+        with st.chat_message('assistant'):
+            st.markdown("\nFinal Report:\n")
+            st.markdown(report)
 
 
         # Show sources
@@ -211,6 +305,12 @@ async def main(
                     f"{counter}"
                 )
             )
+        
+        # 读取搜索的日志信息
+        with open(f"logs/{query}_{start_time.strftime('%Y%m%d%H%M%S')}.log", "r") as f:
+            log_content = f.read()
+        with st.expander("ALL Logs:"):
+            st.markdown(log_content)
 
 
 def run():

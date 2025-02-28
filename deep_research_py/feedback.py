@@ -28,9 +28,9 @@ async def generate_feedback(
     prompt = f"""Analyze the research topic: "{query}" and identify any ambiguous or unclear aspects that need clarification. Generate up to {max_feedbacks} clarifying questions that will help better understand the user's research intent.
 Requirements for the follow-up questions:
 - Focus on ambiguous or undefined aspects in the original query.
-- Please prompt the user with possible answers to the question, in order to help narrow down the user's intent.
-- If the original query is sufficiently clear and comprehensive, you may return an empty question list
-- Return the response as a JSON object with a 'questions' array field, every array element should be a string."""
+- Please prompt the user  to help narrow down the user's intent.
+- If the original query is sufficiently clear and comprehensive, you may return an empty string.
+- Return the response as raw text, not in JSON format."""
 
     response = await generate_completions(
         client=client,
@@ -43,7 +43,7 @@ Requirements for the follow-up questions:
             },
         ],
         # format=FeedbackResponse.model_json_schema(),
-        format={"type": "json_object"},
+        # format={"type": "json_object"},
     )
 
     # Parse the JSON response
@@ -54,22 +54,22 @@ Requirements for the follow-up questions:
         else:
             # OpenAI compatible API
             # json格式兜底
-            json_response = response.choices[0].message.content
-            try:
-                json.loads(json_response) # 为正常json
-            except:
-                json_response = re.findall(r"```(?:json)?\s*(.*?)\s*```", json_response, re.DOTALL)[0]
+            result = response.choices[0].message.content
+            # try:
+            #     json.loads(json_response) # 为正常json
+            # except:
+            #     json_response = re.findall(r"```(?:json)?\s*(.*?)\s*```", json_response, re.DOTALL)[0]
 
-            result = json.loads(json_response)
+            # result = json.loads(json_response)
             
             # result = json.loads(response.choices[0].message.content.strip().strip("```json").strip("```"))
             parse_openai_token_consume("generate_feedback", response)
 
         log_event(
-            f"Generated {len(result.get('questions', []))} feedback follow-up questions for query: {query}"
+            f"Generated {max_feedbacks} feedback follow-up questions for query: {query}"
         )
-        log_event(f"Got feedback follow-up questions: {result.get('questions', [])}")
-        return result.get("questions", [])
+        log_event(f"Got feedback follow-up questions: {result}")
+        return [result]
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON response: {e}")
         print(f"Raw response: {response.choices[0].message.content}")

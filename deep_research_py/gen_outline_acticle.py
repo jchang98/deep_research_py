@@ -3,6 +3,7 @@ from datetime import datetime
 from ai.providers import trim_prompt, generate_completions
 from prompt import system_prompt
 import asyncio
+import streamlit as st
 
 
 async def write_outline(prompt, learnings_string, client, model):
@@ -16,7 +17,7 @@ Here is the format of your writing:
 2. Do not include other information.
 3. Do not include topic name itself in the outline.
 4. Do not include references section part in the outline.
-
+5. The number of section title is less than 8.
 
 The topic you want to write:{prompt}
 
@@ -204,6 +205,9 @@ Already written text:
 """
 
     print("> continue writing section ...")
+    with st.chat_message("assistant"):
+        st.markdown("> Already writing a section,continue writing section ...")
+
     response = await generate_completions(
         client=client,
         model=model,
@@ -303,6 +307,6 @@ async def generate_article(prompt, learnings_string, client, model, outlines, wr
 
             section_content = await generate_section_serial(prompt, learnings_string, model, client, outlines, first_subtitle, second_subtitle, prev_article)
 
-            article += section_content
+            article = article + "\n\n" + section_content
             prev_article = section_content
     return article

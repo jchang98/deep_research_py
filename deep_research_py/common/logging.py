@@ -2,17 +2,21 @@ import logging
 import datetime
 import os
 
-
 logger = None
 
 
-def initial_logger(logging_path: str = "log", enable_stdout: bool = False) -> None:
+def initial_logger(logging_path: str = "log", enable_stdout: bool = False, log_file_name="") -> None:
     """Initializes the logger for the application."""
     global logger
+    # 清除现有的日志处理器
+    if logger:
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
 
     now = datetime.datetime.now()
     log_file = os.path.join(
-        logging_path, f"deep_research_py_{now.strftime('%Y%m%d_%H%M%S')}.log"
+        logging_path, f"{log_file_name}.log"
     )
     if not os.path.exists(logging_path):
         os.makedirs(logging_path)
@@ -23,9 +27,10 @@ def initial_logger(logging_path: str = "log", enable_stdout: bool = False) -> No
         handlers.append(logging.StreamHandler())
     # Set up logging to a file
     logging.basicConfig(
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", handlers=handlers
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", handlers=handlers,
+        force=True
     )
-    logger = logging.getLogger("deep_research_py")
+    logger = logging.getLogger(log_file_name)
     logger.setLevel(logging.INFO)
 
 
